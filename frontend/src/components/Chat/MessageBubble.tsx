@@ -1,5 +1,6 @@
 import type { Message, Agent } from "../../types";
 import { getAgentIconClass } from "../../lib/agentIcons";
+import { renderSimpleMarkdown } from "../../lib/simpleMarkdown";
 
 interface MessageBubbleProps {
   message: Message;
@@ -54,7 +55,7 @@ export function MessageBubble({
       </div>
       <div className="max-w-[72%]">
         <div className="bg-white dark:bg-[#1C1E26] border border-gray-100 dark:border-white/[0.08] px-4 py-2.5 rounded-2xl rounded-tl-sm text-sm text-gray-800 dark:text-gray-200 leading-relaxed shadow-sm">
-          {message.content}
+          {renderSimpleMarkdown(message.content)}
         </div>
         <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-1 pl-1">
           {formatTime(message.created_at)}

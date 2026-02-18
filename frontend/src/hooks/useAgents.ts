@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { supabase, isSupabaseConfigured } from "../lib/supabase";
 import type { Agent } from "../types";
+import { getAgentPingUrl, pingAgent } from "../lib/agentHealth";
 
 export function useAgents() {
   const [agents, setAgents] = useState<Agent[]>([]);
@@ -34,6 +35,43 @@ export function useAgents() {
   useEffect(() => {
     fetchAgents();
   }, []);
+
+  useEffect(() => {
+    if (isSupabaseConfigured) return;
+    if (agents.length === 0) return;
+
+    let canceled = false;
+    const agentIds = agents.map((a) => a.id);
+
+    async function checkAll() {
+      const results = await Promise.all(
+        agentIds.map(async (id) => {
+          const pingUrl = getAgentPingUrl(id);
+          if (!pingUrl) return { id, ok: true };
+          const ok = await pingAgent(pingUrl);
+          return { id, ok };
+        }),
+      );
+
+      if (canceled) return;
+
+      setAgents((prev) =>
+        prev.map((a) => {
+          const found = results.find((r) => r.id === a.id);
+          if (!found) return a;
+          const nextStatus: Agent["status"] = found.ok ? "online" : "offline";
+          return a.status === nextStatus ? a : { ...a, status: nextStatus };
+        }),
+      );
+    }
+
+    checkAll();
+    const intervalId = window.setInterval(checkAll, 10000);
+    return () => {
+      canceled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [agents.length, isSupabaseConfigured]);
 
   async function fetchAgents() {
     setLoading(true);

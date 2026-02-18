@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "../lib/supabase";
 import type { Message, Agent } from "../types";
+import { streamServiceValidation } from "../lib/serviceValidationWs";
 
 const AGENT_REPLIES: Record<string, string[]> = {
   Research: [
@@ -38,6 +39,13 @@ const AGENT_REPLIES: Record<string, string[]> = {
 function getReply(agent: Agent): string {
   const pool = AGENT_REPLIES[agent.category] || AGENT_REPLIES["General"];
   return pool[Math.floor(Math.random() * pool.length)];
+}
+
+async function getAgentReply(agent: Agent, prompt: string): Promise<string> {
+  if (agent.id === "service-validation") {
+    return streamServiceValidation(prompt);
+  }
+  return getReply(agent);
 }
 
 export function useMessages(agentId: string | null, agent: Agent | null) {
@@ -87,22 +95,106 @@ export function useMessages(agentId: string | null, agent: Agent | null) {
       setIsTyping(true);
       const delay = 1200 + Math.random() * 1200;
       setTimeout(async () => {
-        setIsTyping(false);
-        const reply = getReply(agent);
-        const { data: agentInserted } = await (supabase as any)
-          .from("messages")
-          .insert({ agent_id: agentId, content: reply, role: "agent" })
-          .select()
-          .single();
+        if (agent.id === "service-validation") {
+          const thinkingId = crypto.randomUUID();
+          const thinkingMsg: Message = {
+            id: thinkingId,
+            agent_id: agentId,
+            content: "Thinking...",
+            role: "agent",
+            created_at: new Date().toISOString(),
+          };
 
-        const agentMsg: Message = agentInserted || {
-          id: crypto.randomUUID(),
-          agent_id: agentId,
-          content: reply,
-          role: "agent",
-          created_at: new Date().toISOString(),
-        };
-        setMessages((prev) => [...prev, agentMsg as Message]);
+          setMessages((prev) => [...prev, thinkingMsg]);
+
+          try {
+            let hasText = false;
+            const finalText = await streamServiceValidation(content, {
+              onThinking: () => {
+                // keep Thinking...
+              },
+              onChunk: (chunk) => {
+                hasText = true;
+                setMessages((prev) =>
+                  prev.map((m) =>
+                    m.id === thinkingId
+                      ? {
+                          ...m,
+                          content:
+                            m.content === "Thinking..."
+                              ? chunk
+                              : m.content + chunk,
+                        }
+                      : m,
+                  ),
+                );
+              },
+            });
+
+            const reply = hasText ? finalText : finalText;
+
+            const { data: agentInserted } = await (supabase as any)
+              .from("messages")
+              .insert({ agent_id: agentId, content: reply, role: "agent" })
+              .select()
+              .single();
+
+            setMessages((prev) =>
+              prev
+                .filter((m) => m.id !== thinkingId)
+                .concat(
+                  ((agentInserted as Message) || {
+                    id: crypto.randomUUID(),
+                    agent_id: agentId,
+                    content: reply,
+                    role: "agent",
+                    created_at: new Date().toISOString(),
+                  }) as Message,
+                ),
+            );
+          } catch (e) {
+            const errorText = e instanceof Error ? e.message : String(e);
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === thinkingId
+                  ? { ...m, content: `Error: ${errorText}` }
+                  : m,
+              ),
+            );
+          } finally {
+            setIsTyping(false);
+          }
+          return;
+        }
+
+        setIsTyping(false);
+        try {
+          const reply = await getAgentReply(agent, content);
+          const { data: agentInserted } = await (supabase as any)
+            .from("messages")
+            .insert({ agent_id: agentId, content: reply, role: "agent" })
+            .select()
+            .single();
+
+          const agentMsg: Message = agentInserted || {
+            id: crypto.randomUUID(),
+            agent_id: agentId,
+            content: reply,
+            role: "agent",
+            created_at: new Date().toISOString(),
+          };
+          setMessages((prev) => [...prev, agentMsg as Message]);
+        } catch (e) {
+          const errorText = e instanceof Error ? e.message : String(e);
+          const fallback: Message = {
+            id: crypto.randomUUID(),
+            agent_id: agentId,
+            content: `Error: ${errorText}`,
+            role: "agent",
+            created_at: new Date().toISOString(),
+          };
+          setMessages((prev) => [...prev, fallback]);
+        }
       }, delay);
     },
     [agentId, agent],
