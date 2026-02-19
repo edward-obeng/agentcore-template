@@ -9,13 +9,19 @@ export interface StreamCallbacks {
   onChunk?: (chunk: string) => void;
 }
 
+export interface StreamOptions extends StreamCallbacks {
+  sessionId?: string;
+}
+
 export async function streamServiceValidation(
   prompt: string,
-  callbacks: StreamCallbacks = {},
+  options: StreamOptions = {},
 ): Promise<string> {
   const wsUrl =
     (import.meta.env.VITE_SERVICE_VALIDATION_WS_URL as string | undefined) ||
     "ws://localhost:8082/ws";
+
+  const session_id = options.sessionId || crypto.randomUUID();
 
   return new Promise((resolve, reject) => {
     let settled = false;
@@ -49,7 +55,8 @@ export async function streamServiceValidation(
 
     ws.onopen = () => {
       try {
-        ws.send(JSON.stringify({ prompt }));
+        console.log("[WebSocket] Sending message with session_id:", session_id);
+        ws.send(JSON.stringify({ prompt, session_id }));
       } catch (e) {
         fail(e);
       }
@@ -70,7 +77,7 @@ export async function streamServiceValidation(
         const data = JSON.parse(String(evt.data)) as ServiceValidationWsEvent;
 
         if (data.type === "status" && data.status === "processing") {
-          callbacks.onThinking?.();
+          options.onThinking?.();
           return;
         }
 
@@ -78,7 +85,7 @@ export async function streamServiceValidation(
           const chunk = typeof data.content === "string" ? data.content : "";
           if (chunk) {
             text += chunk;
-            callbacks.onChunk?.(chunk);
+            options.onChunk?.(chunk);
           }
           return;
         }

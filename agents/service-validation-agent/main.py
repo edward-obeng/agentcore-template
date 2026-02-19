@@ -1,12 +1,15 @@
 """Service validation agent - KB-only version, AgentCore compatible"""
-
+from typing import Dict
 import uuid
-from typing import List, Dict, Any
+import os
 
 from bedrock_agentcore.runtime import BedrockAgentCoreApp
 from strands import Agent
 from starlette.middleware.cors import CORSMiddleware
 from strands.models.bedrock import BedrockModel
+
+from bedrock_agentcore.memory.integrations.strands.config import AgentCoreMemoryConfig
+from bedrock_agentcore.memory.integrations.strands.session_manager import AgentCoreMemorySessionManager
 
 import json
 
@@ -27,13 +30,37 @@ app.add_middleware(
 model = BedrockModel(model_id=MODEL_ID)
 tools = [retrieve_sdp_calibration_kb]
 
-# Create agent with memory handler attached
-agent = Agent(
-    model=model,
-    system_prompt=SYSTEM_PROMPT,
-    tools=tools,
-)
+# ────────────────────────────────────────────────
+# Memory setup – shared helper
+# ────────────────────────────────────────────────
 
+MEMORY_ID = "TestAgentShortTerm-EXe3AaD3nu"
+
+def get_memory_session_manager(session_id: str) -> AgentCoreMemorySessionManager:
+    config = AgentCoreMemoryConfig(
+        memory_id=MEMORY_ID,
+        session_id=session_id,
+        actor_id="demo_user" 
+    )
+    return AgentCoreMemorySessionManager(
+        agentcore_memory_config=config,
+        region_name="eu-west-1"  
+    )
+
+_agent_cache = {}
+
+def get_agent_for_session(session_id: str) -> Agent:
+    if session_id not in _agent_cache:
+        session_manager = get_memory_session_manager(session_id)
+        _agent_cache[session_id] = Agent(
+            model=model,
+            system_prompt=SYSTEM_PROMPT,
+            tools=tools,
+            session_manager=session_manager,
+        )
+    print(f"DEBUG: Loading agent for session_id = {session_id}")
+    print(f"DEBUG: Cache size now = {len(_agent_cache)}")
+    return _agent_cache[session_id]
 
 # ────────────────────────────────────────────────
 # HTTP entrypoint (AgentCore style)
@@ -46,13 +73,21 @@ async def invoke(payload: Dict, context):
     if not user_message:
         return {"error": "No prompt or question provided"}
     
-    # AgentCore will automatically inject memory via the handler
+    # Get or generate session_id
+    session_id = payload.get("session_id")
+    if not session_id:
+        session_id = str(uuid.uuid4())
+    
+    # Get agent with short-term memory for this session
+    agent = get_agent_for_session(session_id)
+    print(f"DEBUG: Using agent for session {session_id}")
+    
+    
     result = await agent(user_message, context=context)
     
     return {
-        "result": result.message if hasattr(result, 'message') else str(result)
+        "result": result.message if hasattr(result, 'message') else str(result),
     }
-
 
 # ────────────────────────────────────────────────
 # WebSocket handler - AgentCore compatible
@@ -73,19 +108,29 @@ async def websocket_handler(websocket, context):
                     await websocket.send_json({"error": "No prompt provided"})
                     continue
                 
+                # Get or generate session_id
+                session_id = payload.get("session_id")
+                print(f"DEBUG: Using agent for session {session_id}")
+                if not session_id:
+                    session_id = str(uuid.uuid4())
+                
+                # Inform frontend of the session_id 
                 await websocket.send_json({
                     "type": "status",
                     "status": "processing",
-                    "prompt": user_message
+                    "prompt": user_message,
+                    "session_id": session_id
                 })
+                
+                # Get agent with short-term memory for this session
+                agent = get_agent_for_session(session_id)
                 
                 chunk_count = 0
                 full_response = ""
                 
-                # Pass context so memory handler knows which session to use
                 async for event in agent.stream_async(
                     user_message,
-                    context=context  
+                    context=context
                 ):
                     text_content = None
                     
@@ -110,7 +155,8 @@ async def websocket_handler(websocket, context):
                 # Completion
                 await websocket.send_json({
                     "type": "complete",
-                    "total_chunks": chunk_count
+                    "total_chunks": chunk_count,
+                    "session_id": session_id
                 })
                 
             except json.JSONDecodeError:
@@ -121,8 +167,8 @@ async def websocket_handler(websocket, context):
     except Exception:
         pass  # silent close
 
-
 if __name__ == "__main__":
-    print("Starting service validation agent (KB-only mode)...")
+    print("Starting service validation agent (KB-only mode with short-term memory)...")
     print(f"Loaded {len(tools)} tool(s)")
+    print(f"Memory ID: {MEMORY_ID}")
     app.run(port=8082)

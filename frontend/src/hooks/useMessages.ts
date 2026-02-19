@@ -1,210 +1,187 @@
-import { useState, useEffect, useCallback } from "react";
+import { useCallback, useEffect, useState } from "react";
+import type { Agent, Message } from "../types";
 import { supabase } from "../lib/supabase";
-import type { Message, Agent } from "../types";
 import { streamServiceValidation } from "../lib/serviceValidationWs";
 
-const AGENT_REPLIES: Record<string, string[]> = {
-  Research: [
-    "I've analyzed that thoroughly. Based on current data, there are three key patterns worth noting here. Would you like me to go deeper on any of them?",
-    "Great question. Let me break this down with some structured findings. The evidence points in an interesting direction...",
-    "I found several relevant sources on this. The consensus leans toward one interpretation, but there's nuance worth discussing.",
-  ],
-  Creative: [
-    "Oh, I love this direction! Here's an angle you might not have considered — what if we approached it from the reader's emotional journey first?",
-    "Let me riff on that idea with you. Three variations come to mind, each with a different tone and intent...",
-    "There's something really compelling here. I'd push this further — the contrast between those two elements is where the story lives.",
-  ],
-  Finance: [
-    "Running the numbers on that: the model shows a clear pattern, though there's some variance in Q3 worth flagging. Want the full breakdown?",
-    "Financially, the risk-adjusted return on that looks reasonable at current rates. Here's how I'd structure the analysis...",
-    "The data suggests a conservative allocation here. Let me walk through the assumptions underlying that recommendation.",
-  ],
-  Personal: [
-    "That's a great way to frame it. Based on what you've shared, I'd suggest starting with the highest-leverage items first thing in the morning.",
-    "I hear you — that's a lot to manage. Let's break it into three clear priorities for this week. How does that sound?",
-    "Small wins compound. Here's a simple structure that tends to work well for most people in similar situations...",
-  ],
-  Engineering: [
-    "Looking at the architecture here, I see a potential issue with that approach at scale. Here's a cleaner alternative pattern...",
-    "The code logic is solid, but there's a subtle edge case in the error handling. Let me show you what I mean.",
-    "I'd refactor this in two passes: first for correctness, then for readability. The current structure makes the second part harder than it needs to be.",
-  ],
-  General: [
-    "That's an interesting perspective. Let me think through this carefully and share what I'm seeing...",
-    "Good question. Here's how I'd approach it step by step.",
-    "I have a few thoughts on this. The most important thing to consider first is...",
-  ],
-};
+type SupabaseResult<T> = { data: T | null; error: unknown | null };
 
-function getReply(agent: Agent): string {
-  const pool = AGENT_REPLIES[agent.category] || AGENT_REPLIES["General"];
-  return pool[Math.floor(Math.random() * pool.length)];
+interface SupabaseQuery<T> {
+  select(columns?: string): SupabaseQuery<T>;
+  eq(column: string, value: unknown): SupabaseQuery<T>;
+  order(
+    column: string,
+    opts?: { ascending?: boolean },
+  ): Promise<SupabaseResult<T>>;
+  insert(values: unknown): SupabaseQuery<T>;
+  delete(): SupabaseQuery<T>;
+  single(): Promise<SupabaseResult<T>>;
+  then<TResult1 = unknown, TResult2 = never>(
+    onfulfilled?:
+      | ((value: SupabaseResult<T>) => TResult1 | PromiseLike<TResult1>)
+      | null,
+    onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
+  ): Promise<TResult1 | TResult2>;
+}
+
+interface SupabaseLike {
+  from<T>(table: string): SupabaseQuery<T>;
+}
+
+const sb = supabase as unknown as SupabaseLike;
+
+function getFallbackReply(agent: Agent): string {
+  if (agent.id === "comptency-ai") {
+    return "I can help with competency mapping, role requirements, and skills validation. What do you need?";
+  }
+  return "How can I help you today?";
 }
 
 async function getAgentReply(agent: Agent, prompt: string): Promise<string> {
   if (agent.id === "service-validation") {
     return streamServiceValidation(prompt);
   }
-  return getReply(agent);
+  return getFallbackReply(agent);
 }
 
-export function useMessages(agentId: string | null, agent: Agent | null) {
+export function useMessages(
+  threadId: string | null,
+  agent: Agent | null,
+  threadSessionId: string | null,
+) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
 
   useEffect(() => {
-    if (!agentId) {
+    if (!threadId) {
       setMessages([]);
       return;
     }
-    fetchMessages(agentId);
-  }, [agentId]);
 
-  async function fetchMessages(id: string) {
-    setLoading(true);
-    const { data, error } = await (supabase as any)
-      .from("messages")
-      .select("*")
-      .eq("agent_id", id)
-      .order("created_at", { ascending: true });
-    if (!error && data) setMessages(data as Message[]);
-    setLoading(false);
-  }
+    let cancelled = false;
+
+    (async () => {
+      setLoading(true);
+      const { data, error } = await sb
+        .from<Message[]>("messages")
+        .select("*")
+        .eq("thread_id", threadId)
+        .order("created_at", { ascending: true });
+
+      if (!cancelled) {
+        if (!error && data) setMessages(data as Message[]);
+        setLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [threadId]);
 
   const sendMessage = useCallback(
     async (content: string) => {
-      if (!agentId || !agent) return;
+      if (!threadId || !agent) return;
 
-      const userMsg: Message = {
+      console.log("[Send Message] thread_id:", threadId, "| session_id:", threadSessionId);
+
+      const optimisticUser: Message = {
         id: crypto.randomUUID(),
-        agent_id: agentId,
+        thread_id: threadId,
+        agent_id: agent.id,
         content,
         role: "user",
         created_at: new Date().toISOString(),
       };
 
-      const { data: inserted } = await (supabase as any)
-        .from("messages")
-        .insert({ agent_id: agentId, content, role: "user" })
+      const { data: insertedUser } = await sb
+        .from<Message>("messages")
+        .insert({
+          thread_id: threadId,
+          agent_id: agent.id,
+          content,
+          role: "user",
+        })
         .select()
         .single();
 
-      setMessages((prev) => [...prev, (inserted as Message) || userMsg]);
+      setMessages((prev) => [
+        ...prev,
+        (insertedUser as Message) || optimisticUser,
+      ]);
 
       setIsTyping(true);
-      const delay = 1200 + Math.random() * 1200;
-      setTimeout(async () => {
-        if (agent.id === "service-validation") {
-          const thinkingId = crypto.randomUUID();
-          const thinkingMsg: Message = {
-            id: thinkingId,
-            agent_id: agentId,
-            content: "Thinking...",
+
+      const thinkingId = crypto.randomUUID();
+      const thinkingMsg: Message = {
+        id: thinkingId,
+        thread_id: threadId,
+        agent_id: agent.id,
+        content: "Thinking...",
+        role: "agent",
+        created_at: new Date().toISOString(),
+      };
+
+      setMessages((prev) => [...prev, thinkingMsg]);
+
+      try {
+        const reply =
+          agent.id === "service-validation"
+            ? await streamServiceValidation(content, {
+                sessionId: threadSessionId || undefined,
+              })
+            : await getAgentReply(agent, content);
+
+        const { data: insertedAgent } = await sb
+          .from<Message>("messages")
+          .insert({
+            thread_id: threadId,
+            agent_id: agent.id,
+            content: reply,
             role: "agent",
-            created_at: new Date().toISOString(),
-          };
+          })
+          .select()
+          .single();
 
-          setMessages((prev) => [...prev, thinkingMsg]);
-
-          try {
-            let hasText = false;
-            const finalText = await streamServiceValidation(content, {
-              onThinking: () => {
-                // keep Thinking...
-              },
-              onChunk: (chunk) => {
-                hasText = true;
-                setMessages((prev) =>
-                  prev.map((m) =>
-                    m.id === thinkingId
-                      ? {
-                          ...m,
-                          content:
-                            m.content === "Thinking..."
-                              ? chunk
-                              : m.content + chunk,
-                        }
-                      : m,
-                  ),
-                );
-              },
-            });
-
-            const reply = hasText ? finalText : finalText;
-
-            const { data: agentInserted } = await (supabase as any)
-              .from("messages")
-              .insert({ agent_id: agentId, content: reply, role: "agent" })
-              .select()
-              .single();
-
-            setMessages((prev) =>
-              prev
-                .filter((m) => m.id !== thinkingId)
-                .concat(
-                  ((agentInserted as Message) || {
-                    id: crypto.randomUUID(),
-                    agent_id: agentId,
-                    content: reply,
-                    role: "agent",
-                    created_at: new Date().toISOString(),
-                  }) as Message,
-                ),
-            );
-          } catch (e) {
-            const errorText = e instanceof Error ? e.message : String(e);
-            setMessages((prev) =>
-              prev.map((m) =>
-                m.id === thinkingId
-                  ? { ...m, content: `Error: ${errorText}` }
-                  : m,
-              ),
-            );
-          } finally {
-            setIsTyping(false);
-          }
-          return;
-        }
-
-        setIsTyping(false);
-        try {
-          const reply = await getAgentReply(agent, content);
-          const { data: agentInserted } = await (supabase as any)
-            .from("messages")
-            .insert({ agent_id: agentId, content: reply, role: "agent" })
-            .select()
-            .single();
-
-          const agentMsg: Message = agentInserted || {
+        const finalMsg: Message =
+          (insertedAgent as Message) ||
+          ({
             id: crypto.randomUUID(),
-            agent_id: agentId,
+            thread_id: threadId,
+            agent_id: agent.id,
             content: reply,
             role: "agent",
             created_at: new Date().toISOString(),
-          };
-          setMessages((prev) => [...prev, agentMsg as Message]);
-        } catch (e) {
-          const errorText = e instanceof Error ? e.message : String(e);
-          const fallback: Message = {
-            id: crypto.randomUUID(),
-            agent_id: agentId,
-            content: `Error: ${errorText}`,
-            role: "agent",
-            created_at: new Date().toISOString(),
-          };
-          setMessages((prev) => [...prev, fallback]);
-        }
-      }, delay);
+          } satisfies Message);
+
+        setMessages((prev) =>
+          prev.filter((m) => m.id !== thinkingId).concat(finalMsg),
+        );
+      } catch (e) {
+        const errorText = e instanceof Error ? e.message : String(e);
+        const fallback: Message = {
+          id: crypto.randomUUID(),
+          thread_id: threadId,
+          agent_id: agent.id,
+          content: `Error: ${errorText}`,
+          role: "agent",
+          created_at: new Date().toISOString(),
+        };
+        setMessages((prev) =>
+          prev.filter((m) => m.id !== thinkingId).concat(fallback),
+        );
+      } finally {
+        setIsTyping(false);
+      }
     },
-    [agentId, agent],
+    [threadId, agent, threadSessionId],
   );
 
-  async function clearMessages() {
-    if (!agentId) return;
-    await (supabase as any).from("messages").delete().eq("agent_id", agentId);
+  const clearMessages = useCallback(async () => {
+    if (!threadId) return;
+    await sb.from<unknown>("messages").delete().eq("thread_id", threadId);
     setMessages([]);
-  }
+  }, [threadId]);
 
   return { messages, loading, isTyping, sendMessage, clearMessages };
 }

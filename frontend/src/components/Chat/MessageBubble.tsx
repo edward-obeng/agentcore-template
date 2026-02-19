@@ -1,3 +1,5 @@
+import { useState } from "react";
+import { Copy, Check } from "lucide-react";
 import type { Message, Agent } from "../../types";
 import { getAgentIconClass } from "../../lib/agentIcons";
 import { renderSimpleMarkdown } from "../../lib/simpleMarkdown";
@@ -22,6 +24,7 @@ export function MessageBubble({
 }: MessageBubbleProps) {
   const isUser = message.role === "user";
   const iconClass = getAgentIconClass(agent);
+  const [copied, setCopied] = useState(false);
 
   if (isUser) {
     return (
@@ -54,7 +57,24 @@ export function MessageBubble({
         )}
       </div>
       <div className="max-w-[72%]">
-        <div className="bg-white dark:bg-[#1C1E26] border border-gray-100 dark:border-white/[0.08] px-4 py-2.5 rounded-2xl rounded-tl-sm text-sm text-gray-800 dark:text-gray-200 leading-relaxed shadow-sm">
+        <div className="relative group bg-white dark:bg-[#1C1E26] border border-gray-100 dark:border-white/[0.08] px-4 py-2.5 pb-9 rounded-2xl rounded-tl-sm text-sm text-gray-800 dark:text-gray-200 leading-relaxed shadow-sm">
+          <button
+            type="button"
+            onClick={async () => {
+              try {
+                await navigator.clipboard.writeText(message.content);
+                setCopied(true);
+                window.setTimeout(() => setCopied(false), 1200);
+              } catch {
+                // ignore
+              }
+            }}
+            className="absolute bottom-2 right-2 w-7 h-7 rounded-lg flex items-center justify-center text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/10 opacity-0 group-hover:opacity-100 transition-opacity"
+            title={copied ? "Copied" : "Copy"}
+            aria-label={copied ? "Copied" : "Copy"}
+          >
+            {copied ? <Check size={14} /> : <Copy size={14} />}
+          </button>
           {renderSimpleMarkdown(message.content)}
         </div>
         <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-1 pl-1">

@@ -8,6 +8,8 @@ import { getAgentIconClass } from "../../lib/agentIcons";
 
 interface ChatAreaProps {
   agent: Agent;
+  agents: Agent[];
+  onSelectAgent: (agentId: string) => void;
   messages: Message[];
   isTyping: boolean;
   messagesLoading: boolean;
@@ -94,6 +96,8 @@ function WelcomeMessage({ agent, onSend }: WelcomeProps) {
 
 export function ChatArea({
   agent,
+  agents,
+  onSelectAgent,
   messages,
   isTyping,
   messagesLoading,
@@ -111,7 +115,12 @@ export function ChatArea({
 
   return (
     <div className="flex-1 flex flex-col min-w-0 bg-[#FAFAFC] dark:bg-[#0F1117] overflow-hidden">
-      <ChatHeader agent={agent} onClearMessages={onClearMessages} />
+      <ChatHeader
+        agent={agent}
+        agents={agents}
+        onSelectAgent={onSelectAgent}
+        onClearMessages={onClearMessages}
+      />
 
       <div
         ref={scrollRef}
@@ -135,13 +144,15 @@ export function ChatArea({
           <div className="py-6 space-y-2">
             {messages.map((msg, i) => {
               const prevMsg = messages[i - 1];
+              const msgAgent =
+                agents.find((a) => a.id === msg.agent_id) || agent;
               const showAvatar =
                 msg.role === "agent" && (!prevMsg || prevMsg.role !== "agent");
               return (
                 <MessageBubble
                   key={msg.id}
                   message={msg}
-                  agent={agent}
+                  agent={msgAgent}
                   showAvatar={showAvatar}
                 />
               );
