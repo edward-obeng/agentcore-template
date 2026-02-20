@@ -58,12 +58,10 @@ def get_agent_for_session(session_id: str) -> Agent:
             tools=tools,
             session_manager=session_manager,
         )
-    print(f"DEBUG: Loading agent for session_id = {session_id}")
-    print(f"DEBUG: Cache size now = {len(_agent_cache)}")
     return _agent_cache[session_id]
 
 # ────────────────────────────────────────────────
-# HTTP entrypoint (AgentCore style)
+# HTTP entrypoint
 # ────────────────────────────────────────────────
 @app.entrypoint
 async def invoke(payload: Dict, context):
@@ -80,8 +78,6 @@ async def invoke(payload: Dict, context):
     
     # Get agent with short-term memory for this session
     agent = get_agent_for_session(session_id)
-    print(f"DEBUG: Using agent for session {session_id}")
-    
     
     result = await agent(user_message, context=context)
     
@@ -90,7 +86,7 @@ async def invoke(payload: Dict, context):
     }
 
 # ────────────────────────────────────────────────
-# WebSocket handler - AgentCore compatible
+# WebSocket handler 
 # ────────────────────────────────────────────────
 @app.websocket
 async def websocket_handler(websocket, context):
@@ -110,7 +106,7 @@ async def websocket_handler(websocket, context):
                 
                 # Get or generate session_id
                 session_id = payload.get("session_id")
-                print(f"DEBUG: Using agent for session {session_id}")
+
                 if not session_id:
                     session_id = str(uuid.uuid4())
                 

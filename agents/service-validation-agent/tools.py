@@ -1,7 +1,7 @@
 """Tools for service validation agent."""
 import boto3
 from strands import tool
-from config import KB_ID, AWS_REGION  # , GATEWAY_ARN, ROVO_MCP_TARGET_ID
+from config import KB_ID, AWS_REGION 
 
 
 @tool(

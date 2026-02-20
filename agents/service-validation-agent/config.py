@@ -5,10 +5,7 @@ import os
 KB_ID = os.getenv("KB_ID", "OO9ZROVUZJ")
 AWS_REGION = os.getenv("AWS_REGION", "eu-west-1")
 MODEL_ID = os.getenv("MODEL_ID", "us.anthropic.claude-sonnet-4-20250514-v1:0")
-
-# # AgentCore Gateway configuration (COMMENTED OUT FOR KB-ONLY TESTING)
-# GATEWAY_ARN = os.getenv("GATEWAY_ARN")
-# ROVO_MCP_TARGET_ID = os.getenv("ROVO_MCP_TARGET_ID", "rovo-mcp")
+MEMORY_ID = "TestAgentShortTerm-EXe3AaD3nu"
 
 SYSTEM_PROMPT = """You are a service validation assistant for AWS SDP calibration.
 
