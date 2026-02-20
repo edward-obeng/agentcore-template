@@ -83,8 +83,6 @@ export function useMessages(
     async (content: string) => {
       if (!threadId || !agent) return;
 
-      console.log("[Send Message] thread_id:", threadId, "| session_id:", threadSessionId);
-
       const optimisticUser: Message = {
         id: crypto.randomUUID(),
         thread_id: threadId,
@@ -112,23 +110,32 @@ export function useMessages(
 
       setIsTyping(true);
 
-      const thinkingId = crypto.randomUUID();
-      const thinkingMsg: Message = {
-        id: thinkingId,
+      const streamingId = crypto.randomUUID();
+      const streamingMsg: Message = {
+        id: streamingId,
         thread_id: threadId,
         agent_id: agent.id,
-        content: "Thinking...",
+        content: "",
         role: "agent",
         created_at: new Date().toISOString(),
       };
 
-      setMessages((prev) => [...prev, thinkingMsg]);
+      setMessages((prev) => [...prev, streamingMsg]);
 
       try {
         const reply =
           agent.id === "service-validation"
             ? await streamServiceValidation(content, {
                 sessionId: threadSessionId || undefined,
+                onChunk: (chunk) => {
+                  setMessages((prev) =>
+                    prev.map((m) =>
+                      m.id === streamingId
+                        ? { ...m, content: m.content + chunk }
+                        : m,
+                    ),
+                  );
+                },
               })
             : await getAgentReply(agent, content);
 
@@ -143,32 +150,21 @@ export function useMessages(
           .select()
           .single();
 
-        const finalMsg: Message =
-          (insertedAgent as Message) ||
-          ({
-            id: crypto.randomUUID(),
-            thread_id: threadId,
-            agent_id: agent.id,
-            content: reply,
-            role: "agent",
-            created_at: new Date().toISOString(),
-          } satisfies Message);
-
-        setMessages((prev) =>
-          prev.filter((m) => m.id !== thinkingId).concat(finalMsg),
-        );
+        if (insertedAgent) {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === streamingId ? (insertedAgent as Message) : m,
+            ),
+          );
+        }
       } catch (e) {
         const errorText = e instanceof Error ? e.message : String(e);
-        const fallback: Message = {
-          id: crypto.randomUUID(),
-          thread_id: threadId,
-          agent_id: agent.id,
-          content: `Error: ${errorText}`,
-          role: "agent",
-          created_at: new Date().toISOString(),
-        };
         setMessages((prev) =>
-          prev.filter((m) => m.id !== thinkingId).concat(fallback),
+          prev.map((m) =>
+            m.id === streamingId
+              ? { ...m, content: `Error: ${errorText}` }
+              : m,
+          ),
         );
       } finally {
         setIsTyping(false);

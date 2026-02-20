@@ -55,7 +55,6 @@ export async function streamServiceValidation(
 
     ws.onopen = () => {
       try {
-        console.log("[WebSocket] Sending message with session_id:", session_id);
         ws.send(JSON.stringify({ prompt, session_id }));
       } catch (e) {
         fail(e);

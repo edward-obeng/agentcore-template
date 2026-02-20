@@ -36,7 +36,7 @@ class MockQueryBuilder {
     this.table = table;
   }
 
-  select(_columns?: string) {
+  select() {
     return this;
   }
 
@@ -97,6 +97,12 @@ class MockQueryBuilder {
       ...row,
       id: typeof row.id === "string" ? row.id : crypto.randomUUID(),
       created_at: typeof row.created_at === "string" ? row.created_at : now,
+      updated_at:
+        typeof row.updated_at === "string"
+          ? row.updated_at
+          : row.updated_at == null
+            ? now
+            : row.updated_at,
     };
   }
 

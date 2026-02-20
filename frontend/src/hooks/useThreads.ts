@@ -57,7 +57,6 @@ export function useThreads() {
       created_at: now,
       updated_at: now,
     };
-    console.log("[New Chat] Created thread with session_id:", next.session_id);
     setThreads((prev) => {
       const updated = [next, ...prev];
       writeThreads(updated);

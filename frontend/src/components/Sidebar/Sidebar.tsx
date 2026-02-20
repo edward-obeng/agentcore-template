@@ -68,10 +68,10 @@ export function Sidebar({
             </div>
           ) : (
             threads.map((t) => (
-              <button
+              <div
                 key={t.id}
                 onClick={() => onSelectThread(t.id)}
-                className={`group w-full text-left px-3 py-3 rounded-xl transition-all duration-150 border ${
+                className={`group w-full text-left px-3 py-3 rounded-xl transition-all duration-150 border cursor-pointer ${
                   t.id === selectedThreadId
                     ? "bg-orange-50 dark:bg-orange-950/30 border-orange-200 dark:border-orange-500/20"
                     : "border-transparent hover:bg-gray-50 dark:hover:bg-white/5"
@@ -98,7 +98,7 @@ export function Sidebar({
                     <Trash2 size={14} />
                   </button>
                 </div>
-              </button>
+              </div>
             ))
           )}
         </div>
